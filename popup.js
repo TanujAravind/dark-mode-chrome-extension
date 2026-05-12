@@ -5,31 +5,57 @@ const siteToggle = document.getElementById("site-toggle");
 const statusBadge = document.getElementById("status-badge");
 const hostnameLabel = document.getElementById("hostname-label");
 const hintText = document.getElementById("hint-text");
+const excludeForm = document.getElementById("exclude-form");
+const excludeInput = document.getElementById("exclude-input");
+const excludeError = document.getElementById("exclude-error");
+const excludedList = document.getElementById("excluded-list");
 
 let hostname = "";
 let globalEnabled = true;
 let sitePrefs = {};
+let excludedSites = [];
+
+function normalizeHost(h) {
+  return (h || "").toLowerCase().replace(/^www\./, "");
+}
+
+function extractHostname(input) {
+  const trimmed = (input || "").trim();
+  if (!trimmed) return null;
+  const tryParse = (s) => {
+    try { return new URL(s).hostname.toLowerCase(); } catch { return null; }
+  };
+  return tryParse(trimmed) || tryParse("https://" + trimmed);
+}
+
+function isExcluded(host) {
+  const n = normalizeHost(host);
+  return excludedSites.some((s) => normalizeHost(s) === n);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function updateUI() {
   const sitePref = sitePrefs[hostname]; // true | false | undefined
+  const hostExcluded = isExcluded(hostname);
 
   globalToggle.checked = globalEnabled;
 
   // Site toggle reflects explicit pref, or falls back to global
   const siteEffective = sitePref !== undefined ? sitePref : globalEnabled;
-  siteToggle.checked = siteEffective;
+  siteToggle.checked = !hostExcluded && siteEffective;
 
-  // Disable site toggle when global is off and there's no explicit site override
-  siteToggle.disabled = !globalEnabled && sitePref === undefined;
+  // Disable site toggle when excluded, or global off with no explicit site override
+  siteToggle.disabled = hostExcluded || (!globalEnabled && sitePref === undefined);
 
-  const activeOnSite = globalEnabled && siteEffective;
+  const activeOnSite = !hostExcluded && globalEnabled && siteEffective;
   statusBadge.textContent = activeOnSite ? "ON" : "OFF";
   statusBadge.className = "badge" + (activeOnSite ? " on" : "");
 
   // Hint text
-  if (!globalEnabled) {
+  if (hostExcluded) {
+    hintText.textContent = "This site is in the excluded list.";
+  } else if (!globalEnabled) {
     hintText.textContent = "Dark mode is globally disabled.";
   } else if (sitePref === false) {
     hintText.textContent = "Dark mode is disabled for this site.";
@@ -38,6 +64,63 @@ function updateUI() {
   } else {
     hintText.textContent = "Auto-detected: dark mode applies to light sites.";
   }
+
+  renderExcluded();
+}
+
+function renderExcluded() {
+  excludedList.innerHTML = "";
+  if (excludedSites.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No excluded sites yet.";
+    excludedList.appendChild(li);
+    return;
+  }
+  for (const host of excludedSites) {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.className = "host";
+    span.textContent = host;
+    span.title = host;
+    const btn = document.createElement("button");
+    btn.className = "remove";
+    btn.type = "button";
+    btn.textContent = "×";
+    btn.setAttribute("aria-label", `Remove ${host}`);
+    btn.addEventListener("click", () => removeExcluded(host));
+    li.appendChild(span);
+    li.appendChild(btn);
+    excludedList.appendChild(li);
+  }
+}
+
+function saveExcluded() {
+  chrome.storage.sync.set({ excludedSites }, () => {
+    updateUI();
+  });
+}
+
+function addExcluded(rawInput) {
+  excludeError.textContent = "";
+  const host = extractHostname(rawInput);
+  if (!host) {
+    excludeError.textContent = "Couldn't parse a URL from that input.";
+    return;
+  }
+  if (isExcluded(host)) {
+    excludeError.textContent = `${host} is already excluded.`;
+    return;
+  }
+  excludedSites = [...excludedSites, host];
+  excludeInput.value = "";
+  saveExcluded();
+}
+
+function removeExcluded(host) {
+  const n = normalizeHost(host);
+  excludedSites = excludedSites.filter((s) => normalizeHost(s) !== n);
+  saveExcluded();
 }
 
 // ─── Load state ───────────────────────────────────────────────────────────────
@@ -51,11 +134,17 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
   }
   hostnameLabel.textContent = hostname || "—";
 
-  chrome.storage.sync.get(["globalEnabled", "sitePrefs"], (data) => {
+  chrome.storage.sync.get(["globalEnabled", "sitePrefs", "excludedSites"], (data) => {
     globalEnabled = data.globalEnabled !== false;
     sitePrefs = data.sitePrefs || {};
+    excludedSites = Array.isArray(data.excludedSites) ? data.excludedSites : [];
     updateUI();
   });
+});
+
+excludeForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  addExcluded(excludeInput.value);
 });
 
 // ─── Global toggle ────────────────────────────────────────────────────────────

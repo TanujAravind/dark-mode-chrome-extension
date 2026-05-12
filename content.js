@@ -397,31 +397,47 @@ function getHostname() {
   return location.hostname;
 }
 
+function normalizeHost(h) {
+  return (h || "").toLowerCase().replace(/^www\./, "");
+}
+
+function isHostExcluded(hostname, excludedSites) {
+  const current = normalizeHost(hostname);
+  if (!current) return false;
+  return excludedSites.some((s) => normalizeHost(s) === current);
+}
+
 function loadPrefsAndApply() {
-  chrome.storage.sync.get(["globalEnabled", "sitePrefs"], ({ globalEnabled = true, sitePrefs = {} }) => {
-    const hostname = getHostname();
-    const sitePref = sitePrefs[hostname];
+  chrome.storage.sync.get(
+    ["globalEnabled", "sitePrefs", "excludedSites"],
+    ({ globalEnabled = true, sitePrefs = {}, excludedSites = [] }) => {
+      const hostname = getHostname();
+      const sitePref = sitePrefs[hostname];
+      const excluded = isHostExcluded(hostname, excludedSites);
 
-    // Site override takes priority over global
-    let shouldEnable;
-    if (sitePref === false) {
-      shouldEnable = false;
-    } else if (sitePref === true) {
-      shouldEnable = true;
-    } else {
-      // No site override — respect global and page darkness
-      shouldEnable = globalEnabled && !pageIsAlreadyDark();
-    }
-
-    if (shouldEnable) {
-      // Wait until DOM is ready
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", enable, { once: true });
+      // Excluded list wins over everything; otherwise site override wins over global
+      let shouldEnable;
+      if (excluded) {
+        shouldEnable = false;
+      } else if (sitePref === false) {
+        shouldEnable = false;
+      } else if (sitePref === true) {
+        shouldEnable = true;
       } else {
-        enable();
+        shouldEnable = globalEnabled && !pageIsAlreadyDark();
+      }
+
+      if (shouldEnable && !_enabled) {
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", enable, { once: true });
+        } else {
+          enable();
+        }
+      } else if (!shouldEnable && _enabled) {
+        disable();
       }
     }
-  });
+  );
 }
 
 // ─── Messaging from background / popup ───────────────────────────────────────
@@ -440,6 +456,16 @@ chrome.runtime.onMessage.addListener((msg) => {
     } else {
       loadPrefsAndApply();
     }
+  }
+  if (msg.type === "EXCLUDED_CHANGED") {
+    loadPrefsAndApply();
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  if (changes.excludedSites || changes.globalEnabled || changes.sitePrefs) {
+    loadPrefsAndApply();
   }
 });
 

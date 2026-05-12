@@ -41,6 +41,29 @@
     </div>
 
     <p class="hint" id="hint-text"></p>
+
+    <div class="divider"></div>
+
+    <section class="excluded">
+      <div class="excluded-header">
+        <span class="toggle-label">Excluded sites</span>
+        <span class="toggle-sub">Dark mode never runs on these</span>
+      </div>
+
+      <form id="exclude-form" class="exclude-row">
+        <input
+          type="text"
+          id="exclude-input"
+          placeholder="Paste URL e.g. https://www.youtube.com/"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button type="submit" id="exclude-add">Add</button>
+      </form>
+      <p id="exclude-error" class="exclude-error"></p>
+
+      <ul id="excluded-list" class="excluded-list"></ul>
+    </section>
   </main>
 
   <script src="popup.js"></script>
